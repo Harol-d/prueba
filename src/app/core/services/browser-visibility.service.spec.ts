@@ -101,9 +101,9 @@ describe('BrowserVisibilityService', () => {
 
   // ── Evento visibilitychange ──────────────────────────────────────────────
 
-  it('debe emitir snapshot con visibilityState="hidden" al ocurrir visibilitychange', fakeAsync(async () => {
-    // Colectamos el inicial + 1 evento
-    const snapshots$ = service.visibility$.pipe(skip(1), take(1)).toPromise();
+  it('debe emitir snapshot con visibilityState="hidden" al ocurrir visibilitychange', async () => {
+    // Colectamos el siguiente evento
+    const snapshotPromise = firstValueFrom(service.visibility$.pipe(skip(1), take(1)));
 
     // Simulamos que el documento se oculta
     Object.defineProperty(document, 'visibilityState', {
@@ -111,9 +111,8 @@ describe('BrowserVisibilityService', () => {
       get: () => 'hidden',
     });
     fireDocumentEvent('visibilitychange');
-    tick();
 
-    const snapshot = await snapshots$;
+    const snapshot = await snapshotPromise;
     expect(snapshot?.visibilityState).toBe('hidden');
     expect(snapshot?.eventType).toBe('visibilitychange');
 
@@ -122,63 +121,56 @@ describe('BrowserVisibilityService', () => {
       configurable: true,
       get: () => 'visible',
     });
-  }));
+  });
 
   // ── Evento blur ──────────────────────────────────────────────────────────
 
-  it('debe emitir isTabActive=false al disparar blur en window', fakeAsync(async () => {
-    const snapshots$ = service.visibility$.pipe(skip(1), take(1)).toPromise();
+  it('debe emitir isTabActive=false al disparar blur en window', async () => {
+    const snapshotPromise = firstValueFrom(service.visibility$.pipe(skip(1), take(1)));
 
     fireWindowEvent('blur');
-    tick();
 
-    const snapshot = await snapshots$;
+    const snapshot = await snapshotPromise;
     expect(snapshot?.isTabActive).toBe(false);
     expect(snapshot?.eventType).toBe('blur');
-  }));
+  });
 
   // ── Evento focus ─────────────────────────────────────────────────────────
 
-  it('debe emitir isTabActive=true al disparar focus en window', fakeAsync(async () => {
+  it('debe emitir isTabActive=true al disparar focus en window', async () => {
     // Primero emitimos un blur para cambiar el estado
     fireWindowEvent('blur');
 
-    const snapshots$ = service.visibility$.pipe(skip(1), take(1)).toPromise();
+    const snapshotPromise = firstValueFrom(service.visibility$.pipe(skip(1), take(1)));
     fireWindowEvent('focus');
-    tick();
 
-    const snapshot = await snapshots$;
+    const snapshot = await snapshotPromise;
     expect(snapshot?.eventType).toBe('focus');
     expect(snapshot?.isTabActive).toBe(true);
-  }));
+  });
 
   // ── Evento beforeunload ──────────────────────────────────────────────────
 
-  it('debe emitir visibilityState="hidden" e isTabActive=false en beforeunload', fakeAsync(async () => {
-    const snapshots$ = service.visibility$.pipe(skip(1), take(1)).toPromise();
+  it('debe emitir visibilityState="hidden" e isTabActive=false en beforeunload', async () => {
+    const snapshotPromise = firstValueFrom(service.visibility$.pipe(skip(1), take(1)));
 
     fireWindowEvent('beforeunload');
-    tick();
 
-    const snapshot = await snapshots$;
+    const snapshot = await snapshotPromise;
     expect(snapshot?.visibilityState).toBe('hidden');
     expect(snapshot?.isTabActive).toBe(false);
     expect(snapshot?.eventType).toBe('beforeunload');
-  }));
+  });
 
   // ── distinctUntilChanged ─────────────────────────────────────────────────
 
-  it('no debe emitir si el nuevo evento tiene el mismo estado semántico', fakeAsync(async () => {
+  it('no debe emitir si el nuevo evento tiene el mismo estado semántico', async () => {
     const emitted: VisibilitySnapshot[] = [];
     const sub = service.visibility$.subscribe((s) => emitted.push(s));
 
-    const initialCount = emitted.length; // 1 (el snapshot inicial)
-
     // Disparar el mismo evento dos veces seguidas sin cambio de estado
     fireWindowEvent('focus');
-    tick();
     fireWindowEvent('focus');
-    tick();
 
     // Solo debe haber añadido como máximo 1 nuevo emisión (si el estado cambió)
     // pero nunca duplicados del mismo estado semántico
@@ -186,7 +178,7 @@ describe('BrowserVisibilityService', () => {
     expect(uniqueStates.size).toBe(emitted.length);
 
     sub.unsubscribe();
-  }));
+  });
 
   // ── shareReplay ──────────────────────────────────────────────────────────
 

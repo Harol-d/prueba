@@ -235,7 +235,7 @@ export class BrowserVisibilityService implements OnDestroy {
     }).pipe(
       // Compartimos la misma suscripción entre todos los consumers y
       // reproducimos el último valor para los nuevos suscriptores tardíos.
-      shareReplay({ bufferSize: 1, refCount: true }),
+      shareReplay(1),
     );
   }
 

@@ -1,63 +1,83 @@
 /**
  * @file visibility-monitor.component.spec.ts
- * @description Tests unitarios para VisibilityMonitorComponent.
- *
- * Estrategia:
- * - Se provee un mock de BrowserVisibilityService usando un Subject controlado.
- * - Se verifica el renderizado reactivo con signals y la gestión del historial.
- * - Se comprueba que el componente NO se rompe cuando el servicio no emite nada.
+ * @description Tests unitarios para VisibilityMonitorComponent con WebGL, Fullscreen y VM.
  */
 
-import { TestBed, fakeAsync, tick } from '@angular/core/testing';
-import { ComponentFixture } from '@angular/core/testing';
-import { Subject } from 'rxjs';
+import { TestBed, ComponentFixture, fakeAsync, tick } from '@angular/core/testing';
+import { Subject, of } from 'rxjs';
+import { signal } from '@angular/core';
 import { VisibilityMonitorComponent } from './visibility-monitor.component';
-import { BrowserVisibilityService } from '../../core/services/browser-visibility.service';
-import { VisibilitySnapshot } from '../../core/services/browser-visibility.model';
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Mock del servicio
-// ──────────────────────────────────────────────────────────────────────────────
-
-function makeSnapshot(overrides: Partial<VisibilitySnapshot> = {}): VisibilitySnapshot {
-  return Object.freeze({
-    visibilityState: 'visible',
-    isTabActive: true,
-    timestamp: new Date(),
-    eventType: 'visibilitychange',
-    ...overrides,
-  }) as VisibilitySnapshot;
-}
-
-class MockBrowserVisibilityService {
-  private readonly subject = new Subject<VisibilitySnapshot>();
-  readonly visibility$ = this.subject.asObservable();
-
-  emit(snapshot: VisibilitySnapshot): void {
-    this.subject.next(snapshot);
-  }
-
-  complete(): void {
-    this.subject.complete();
-  }
-}
-
-// ──────────────────────────────────────────────────────────────────────────────
-// Suite principal
-// ──────────────────────────────────────────────────────────────────────────────
+import { BrowserActivityFacade } from '../../core/services/browser-activity.facade';
+import { ActivityState } from '../../core/services/browser-activity.model';
+import { SecurityTelemetryEvent } from '../../core/services/security-telemetry.service';
+import { VmReport } from '../../core/services/vm-detector.service';
 
 describe('VisibilityMonitorComponent', () => {
   let fixture: ComponentFixture<VisibilityMonitorComponent>;
   let component: VisibilityMonitorComponent;
-  let mockService: MockBrowserVisibilityService;
+
+  const mockActivity$ = new Subject<ActivityState>();
+  const mockSecurity$ = new Subject<SecurityTelemetryEvent>();
+
+  const isFullscreenSignal = signal<boolean>(false);
+  const isWindowFocusedSignal = signal<boolean>(true);
+  const isDevToolsOpenSignal = signal<boolean>(false);
+  const totalViolationsSignal = signal<number>(0);
+  const vmReportSignal = signal<VmReport>({
+    isVm: false,
+    riskLevel: 'PHYSICAL',
+    confidenceScore: 0,
+    detectedHypervisor: null,
+    gpuVendor: 'NVIDIA',
+    gpuRenderer: 'GeForce RTX 4090',
+    unmaskedVendor: 'NVIDIA Corporation',
+    unmaskedRenderer: 'NVIDIA GeForce RTX 4090 Direct3D11',
+    hardwareConcurrency: 16,
+    deviceMemoryGb: 16,
+    isWebDriver: false,
+    screenMetrics: '1920x1080',
+    riskFactors: [],
+    webglExtensionsCount: 40,
+    maxTextureSize: 16384,
+    batteryStatus: 'OK',
+    analyzedAt: new Date(),
+  });
+
+  const mockFacade = {
+    activityState$: mockActivity$.asObservable(),
+    securityEvents$: mockSecurity$.asObservable(),
+    queueSize$: of(0),
+    isFullscreen: isFullscreenSignal,
+    isWindowFocused: isWindowFocusedSignal,
+    isDevToolsOpen: isDevToolsOpenSignal,
+    totalViolations: totalViolationsSignal,
+    vmReport: vmReportSignal,
+    getSessionStats: () => ({
+      sessionId: 'test-session',
+      startedAt: new Date(),
+      durationMs: 120000,
+      totalEvents: 5,
+      queuedEvents: 0,
+      sentBatches: 1,
+      idleCount: 0,
+      visibilityHiddenCount: 0,
+      networkDropCount: 0,
+    }),
+    requestFullscreen: vi.fn().mockResolvedValue(true),
+    exitFullscreen: vi.fn().mockResolvedValue(undefined),
+    recheckEnvironment: vi.fn().mockReturnValue(vmReportSignal()),
+  };
 
   beforeEach(async () => {
-    mockService = new MockBrowserVisibilityService();
+    isFullscreenSignal.set(false);
+    isWindowFocusedSignal.set(true);
+    isDevToolsOpenSignal.set(false);
+    totalViolationsSignal.set(0);
 
     await TestBed.configureTestingModule({
       imports: [VisibilityMonitorComponent],
       providers: [
-        { provide: BrowserVisibilityService, useValue: mockService },
+        { provide: BrowserActivityFacade, useValue: mockFacade },
       ],
     }).compileComponents();
 
@@ -67,124 +87,74 @@ describe('VisibilityMonitorComponent', () => {
   });
 
   afterEach(() => {
-    mockService.complete();
     TestBed.resetTestingModule();
   });
 
-  // ── Creación ─────────────────────────────────────────────────────────────
-
-  it('debe crearse sin errores', () => {
+  it('debe crearse correctamente', () => {
     expect(component).toBeTruthy();
   });
 
-  it('currentSnapshot debe ser null antes de recibir eventos', () => {
-    expect(component.currentSnapshot()).toBeNull();
+  it('debe mostrar el bloqueo de pantalla completa cuando isFullscreen es false', () => {
+    isFullscreenSignal.set(false);
+    fixture.detectChanges();
+
+    const gate = fixture.nativeElement.querySelector('.fullscreen-gate');
+    expect(gate).toBeTruthy();
+    expect(fixture.nativeElement.textContent).toContain('ACCESO BLOQUEADO');
   });
 
-  it('eventHistory debe estar vacío al inicio', () => {
-    expect(component.eventHistory()).toHaveLength(0);
+  it('debe desbloquear la interfaz cuando se activa pantalla completa', () => {
+    isFullscreenSignal.set(true);
+    fixture.detectChanges();
+
+    const gate = fixture.nativeElement.querySelector('.fullscreen-gate');
+    expect(gate).toBeFalsy();
   });
 
-  // ── Reactividad con el servicio ──────────────────────────────────────────
-
-  it('debe actualizar currentSnapshot al recibir un snapshot del servicio', fakeAsync(() => {
-    const snap = makeSnapshot({ isTabActive: false, visibilityState: 'hidden', eventType: 'blur' });
-
-    mockService.emit(snap);
-    tick();
+  it('debe llamar a requestFullscreen al presionar el botón de desbloqueo', async () => {
+    isFullscreenSignal.set(false);
     fixture.detectChanges();
 
-    expect(component.currentSnapshot()).toEqual(snap);
-  }));
+    const ctaBtn = fixture.nativeElement.querySelector('.gate-cta-btn');
+    ctaBtn.click();
 
-  it('debe añadir eventos al historial', fakeAsync(() => {
-    const snap1 = makeSnapshot({ eventType: 'blur', isTabActive: false });
-    const snap2 = makeSnapshot({ eventType: 'focus', isTabActive: true });
-
-    mockService.emit(snap1);
-    tick();
-    mockService.emit(snap2);
-    tick();
-    fixture.detectChanges();
-
-    // El más reciente va primero
-    expect(component.eventHistory()[0]).toEqual(snap2);
-    expect(component.eventHistory()[1]).toEqual(snap1);
-    expect(component.eventHistory()).toHaveLength(2);
-  }));
-
-  it('el historial no debe superar 10 elementos', fakeAsync(() => {
-    for (let i = 0; i < 15; i++) {
-      mockService.emit(makeSnapshot({ eventType: i % 2 === 0 ? 'blur' : 'focus' }));
-      tick();
-    }
-    fixture.detectChanges();
-
-    expect(component.eventHistory().length).toBeLessThanOrEqual(10);
-  }));
-
-  // ── Renderizado del template ──────────────────────────────────────────────
-
-  it('debe mostrar badge ACTIVA cuando isTabActive=true', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ isTabActive: true }));
-    tick();
-    fixture.detectChanges();
-
-    const badge: HTMLElement = fixture.nativeElement.querySelector('.status-badge');
-    expect(badge?.textContent?.trim()).toBe('ACTIVA');
-    expect(badge?.classList).toContain('badge--active');
-  }));
-
-  it('debe mostrar badge INACTIVA cuando isTabActive=false', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ isTabActive: false }));
-    tick();
-    fixture.detectChanges();
-
-    const badge: HTMLElement = fixture.nativeElement.querySelector('.status-badge');
-    expect(badge?.textContent?.trim()).toBe('INACTIVA');
-    expect(badge?.classList).toContain('badge--inactive');
-  }));
-
-  it('debe mostrar el mensaje "Esperando eventos..." cuando el historial está vacío', () => {
-    const empty: HTMLElement = fixture.nativeElement.querySelector('.history-empty');
-    expect(empty?.textContent?.trim()).toBe('Esperando eventos...');
+    expect(mockFacade.requestFullscreen).toHaveBeenCalled();
   });
 
-  it('debe mostrar los items del historial al recibir eventos', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ eventType: 'blur' }));
-    mockService.emit(makeSnapshot({ eventType: 'focus' }));
-    tick();
+  it('debe reflejar estado de Máquina Virtual si se detecta', () => {
+    vmReportSignal.set({
+      ...vmReportSignal(),
+      isVm: true,
+      riskLevel: 'CRITICAL_VM',
+      confidenceScore: 95,
+      detectedHypervisor: 'VMware SVGA3D',
+      riskFactors: ['GPU coincide con firma VMware'],
+    });
+    isFullscreenSignal.set(true);
     fixture.detectChanges();
 
-    const items: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.history-item');
-    expect(items.length).toBe(2);
-  }));
+    expect(fixture.nativeElement.textContent).toContain('MÁQUINA VIRTUAL DETECTADA');
+    expect(fixture.nativeElement.textContent).toContain('VMware SVGA3D');
+  });
 
-  it('la tarjeta de estado debe usar clase card--visible cuando la pestaña es visible', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ isTabActive: true, visibilityState: 'visible' }));
-    tick();
+  it('debe registrar eventos de seguridad en el feed', async () => {
+    isFullscreenSignal.set(true);
     fixture.detectChanges();
 
-    const card: HTMLElement = fixture.nativeElement.querySelector('.state-card');
-    expect(card?.classList).toContain('card--visible');
-  }));
+    const secEvent: SecurityTelemetryEvent = {
+      id: 'test-sec-1',
+      type: 'devtools_opened',
+      label: 'DevTools Detectadas',
+      detail: 'Inspector abierto',
+      icon: '🛠️',
+      severity: 'critical',
+      timestamp: new Date(),
+    };
 
-  it('la tarjeta de estado debe usar clase card--hidden cuando la pestaña está oculta', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ isTabActive: false, visibilityState: 'hidden' }));
-    tick();
+    mockSecurity$.next(secEvent);
     fixture.detectChanges();
 
-    const card: HTMLElement = fixture.nativeElement.querySelector('.state-card');
-    expect(card?.classList).toContain('card--hidden');
-  }));
-
-  it('debe mostrar correctamente el eventType en la tarjeta de estado', fakeAsync(() => {
-    mockService.emit(makeSnapshot({ eventType: 'beforeunload' }));
-    tick();
-    fixture.detectChanges();
-
-    const rows: NodeListOf<HTMLElement> = fixture.nativeElement.querySelectorAll('.state-row code');
-    const eventTypeRow = Array.from(rows).find((r) => r.textContent?.includes('beforeunload'));
-    expect(eventTypeRow).toBeTruthy();
-  }));
+    expect(component.feedEntries().length).toBeGreaterThan(0);
+    expect(component.feedEntries()[0].label).toBe('DevTools Detectadas');
+  });
 });

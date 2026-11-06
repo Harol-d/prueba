@@ -122,8 +122,8 @@ export class ActivityAuditService implements OnDestroy {
       idleStatus: state.idle.status,
       isOnline: state.network.isOnline,
       attentionLevel: state.attentionLevel,
-      url: location.href,
-      userAgent: navigator.userAgent,
+      url: typeof location !== 'undefined' ? location.href : '',
+      userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
       metadata: {
         eventType: state.visibility.eventType,
         lastActivityEvent: state.idle.lastActivityEvent,

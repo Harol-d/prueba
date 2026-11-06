@@ -37,6 +37,8 @@ import { BrowserVisibilityService } from './browser-visibility.service';
 import { UserIdleService } from './user-idle.service';
 import { NetworkStatusService } from './network-status.service';
 import { ActivityAuditService } from './activity-audit.service';
+import { VmDetectorService, VmReport } from './vm-detector.service';
+import { SecurityTelemetryService, SecurityTelemetryEvent } from './security-telemetry.service';
 import { BROWSER_ACTIVITY_CONFIG } from './browser-activity.config';
 import {
   ActivityState,
@@ -68,9 +70,18 @@ export class BrowserActivityFacade implements OnDestroy {
   private readonly idleService = inject(UserIdleService);
   private readonly networkService = inject(NetworkStatusService);
   private readonly auditService = inject(ActivityAuditService);
+  private readonly vmDetectorService = inject(VmDetectorService);
+  private readonly securityTelemetry = inject(SecurityTelemetryService);
   private readonly config = inject(BROWSER_ACTIVITY_CONFIG);
   private readonly platformId = inject(PLATFORM_ID);
   private readonly destroy$ = new Subject<void>();
+
+  // ── Signals de Telemetría Avanzada y Máquina Virtual ─────────────────────
+  readonly vmReport = this.vmDetectorService.report;
+  readonly isFullscreen = this.securityTelemetry.isFullscreen;
+  readonly isWindowFocused = this.securityTelemetry.isWindowFocused;
+  readonly isDevToolsOpen = this.securityTelemetry.isDevToolsOpen;
+  readonly totalViolations = this.securityTelemetry.totalViolations;
 
   // ── Streams individuales (re-exportados para conveniencia) ───────────────
   readonly visibility$: Observable<VisibilitySnapshot> =
@@ -82,6 +93,22 @@ export class BrowserActivityFacade implements OnDestroy {
     this.networkService.networkState$;
 
   readonly queueSize$: Observable<number> = this.auditService.queueSize$;
+
+  readonly securityEvents$: Observable<SecurityTelemetryEvent> =
+    this.securityTelemetry.events$;
+
+  // ── Control de Pantalla Completa ─────────────────────────────────────────
+  requestFullscreen(): Promise<boolean> {
+    return this.securityTelemetry.requestFullscreen();
+  }
+
+  exitFullscreen(): Promise<void> {
+    return this.securityTelemetry.exitFullscreen();
+  }
+
+  recheckEnvironment(): VmReport {
+    return this.vmDetectorService.analyzeEnvironment();
+  }
 
   // ── Estado unificado ─────────────────────────────────────────────────────
   /**
